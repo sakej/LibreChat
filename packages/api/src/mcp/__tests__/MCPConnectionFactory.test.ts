@@ -405,6 +405,7 @@ describe('MCPConnectionFactory', () => {
         tokenMethods: {
           findToken: undefined as unknown as TokenMethods['findToken'],
           createToken: jest.fn(),
+          upsertToken: jest.fn(),
           updateToken: jest.fn(),
           deleteTokens: jest.fn(),
         },
@@ -2449,6 +2450,7 @@ describe('MCPConnectionFactory', () => {
           tokenMethods: {
             findToken: jest.fn(),
             createToken: jest.fn(),
+            upsertToken: jest.fn(),
             updateToken: jest.fn(),
             deleteTokens: jest.fn(),
           },
@@ -2552,6 +2554,7 @@ describe('MCPConnectionFactory', () => {
         tokenMethods: {
           findToken: jest.fn(),
           createToken: jest.fn(),
+          upsertToken: jest.fn(),
           updateToken: jest.fn(),
           deleteTokens: jest.fn(),
         },
@@ -2572,6 +2575,7 @@ describe('MCPConnectionFactory', () => {
           tokenMethods: {
             findToken: jest.fn(),
             createToken: jest.fn(),
+            upsertToken: jest.fn(),
             updateToken: jest.fn(),
             deleteTokens: jest.fn(),
           },
