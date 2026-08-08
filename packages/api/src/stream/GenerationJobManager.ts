@@ -541,6 +541,10 @@ interface RuntimeJobState {
   startupTelemetry?: AgentStartupTelemetry;
   finalEvent?: t.ServerSentEvent;
   errorEvent?: string;
+  /** Terminal persistence and publish have finished, but an attached local
+   * subscriber has not yet consumed the asynchronously dispatched terminal
+   * frame. The all-subscribers-left callback releases this retained runtime. */
+  terminalCleanupDeferred?: boolean;
   /** Local, runtime-scoped terminal handlers. Avoids broadcasting predecessor errors to a
    * replacement generation that reuses the same durable stream ID. */
   localErrorHandlers: Set<t.ErrorHandler>;
@@ -1295,6 +1299,12 @@ class GenerationJobManagerClass {
       // disconnect. Running partial-response handlers here can overwrite the
       // already-saved final response as unfinished.
       if (runtime.finalEvent || runtime.errorEvent) {
+        if (
+          runtime.terminalCleanupDeferred === true &&
+          this.runtimeState.get(streamId) === runtime
+        ) {
+          this.runtimeState.delete(streamId);
+        }
         return;
       }
 
@@ -3402,7 +3412,17 @@ class GenerationJobManagerClass {
         this.replayEventWriteQueues.delete(streamId);
         this.tokenUsageWriteQueues.delete(streamId);
         if (status !== 'error' && this._cleanupOnComplete) {
-          this.runtimeState.delete(streamId);
+          /** Redis Cluster can acknowledge the terminal publish before its
+           * subscriber connection dispatches the earlier chunk batch and the
+           * terminal frame. Keep runtime identity while a local SSE subscriber
+           * is attached, otherwise its callbacks reject those delayed frames.
+           * Terminal delivery or disconnect synchronously drops the subscriber
+           * count and lets registerAllSubscribersLeft release this runtime. */
+          if (this.eventTransport.getSubscriberCount(streamId) > 0) {
+            runtime.terminalCleanupDeferred = true;
+          } else {
+            this.runtimeState.delete(streamId);
+          }
         }
       }
 

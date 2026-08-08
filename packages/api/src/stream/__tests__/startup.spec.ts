@@ -2677,6 +2677,58 @@ describe('GenerationJobManager startup telemetry', () => {
     await manager.destroy();
   });
 
+  it('retains runtime identity until delayed terminal transport delivery', async () => {
+    const eventTransport = new InMemoryEventTransport();
+    const emitChunk = eventTransport.emitChunk.bind(eventTransport);
+    const emitDone = eventTransport.emitDone.bind(eventTransport);
+    const pendingDeliveries: Array<() => void> = [];
+    jest.spyOn(eventTransport, 'emitChunk').mockImplementation((...args) => {
+      pendingDeliveries.push(() => emitChunk(...args));
+    });
+    jest.spyOn(eventTransport, 'emitDone').mockImplementation((...args) => {
+      pendingDeliveries.push(() => emitDone(...args));
+    });
+
+    const manager = new GenerationJobManagerClass();
+    manager.configure({
+      jobStore: new InMemoryJobStore({ ttlAfterComplete: 60_000 }),
+      eventTransport,
+      isRedis: false,
+      cleanupOnComplete: true,
+    });
+    manager.initialize();
+    const streamId = 'stream-delayed-terminal-delivery';
+    const job = await manager.createJob(streamId, 'user-1', streamId);
+    const received: ServerSentEvent[] = [];
+    const onDone = jest.fn();
+    await manager.subscribe(streamId, (event) => received.push(event), onDone);
+    const delta = {
+      event: 'on_message_delta',
+      data: { id: 'step-1', delta: { content: [{ type: 'text', text: 'tail' }] } },
+    } as ServerSentEvent;
+
+    await manager.emitChunk(streamId, delta);
+    await expect(
+      manager.abortJob(streamId, { expectedCreatedAt: job.createdAt }),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(received).toEqual([]);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(eventTransport.getSubscriberCount(streamId)).toBe(1);
+    expect(manager.getRuntimeStats().runtimeStateSize).toBe(1);
+
+    for (const deliver of pendingDeliveries) {
+      deliver();
+    }
+
+    expect(received).toEqual([delta]);
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ final: true, aborted: true }));
+    expect(eventTransport.getSubscriberCount(streamId)).toBe(0);
+    expect(manager.getRuntimeStats().runtimeStateSize).toBe(0);
+
+    await manager.destroy();
+  });
+
   it('waits for transport readiness before scheduling a stored terminal event', async () => {
     const eventTransport = new InMemoryEventTransport();
     const originalSubscribe = eventTransport.subscribe.bind(eventTransport);
